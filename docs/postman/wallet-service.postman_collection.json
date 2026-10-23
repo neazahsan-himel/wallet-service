@@ -1,0 +1,804 @@
+{
+  "info": {
+    "name": "Wallet Service (IQD)",
+    "description": "Every endpoint and every outcome of the wallet service.\n\nRun the whole collection in order (Collection > Run). Requests depend on each other: Setup creates the wallets, later folders move money between them and check the exact balances.\n\nEvery request name ends with its expected result, e.g. `[201]` or `[422 INSUFFICIENT_FUNDS]`. A collection-level test reads that tag and asserts the HTTP status and the ProblemDetail `code`, so each request needs only its extra checks.\n\nEach run uses a fresh `runId` (set in Setup) as the prefix of every Idempotency-Key, so the collection can be run again without key clashes.\n\nThe last folder, Frozen wallet, needs one manual SQL step first. See its description.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Expected outcome is encoded in the request name: [201] or [422 INSUFFICIENT_FUNDS].",
+          "const tag = pm.info.requestName.match(/\\[(\\d{3})(?: ([A-Z_]+))?\\]\\s*$/);",
+          "if (tag) {",
+          "    pm.test('status is ' + tag[1], () => pm.response.to.have.status(Number(tag[1])));",
+          "    if (tag[2]) {",
+          "        pm.test('error code is ' + tag[2], () => pm.expect(pm.response.json().code).to.eql(tag[2]));",
+          "    }",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8088" },
+    { "key": "runId", "value": "" },
+    { "key": "walletA", "value": "" },
+    { "key": "walletB", "value": "" },
+    { "key": "walletC", "value": "" },
+    { "key": "walletD", "value": "" },
+    { "key": "depositId", "value": "" },
+    { "key": "transferId", "value": "" },
+    { "key": "paymentId", "value": "" },
+    { "key": "feeAccount", "value": "00000000-0000-7000-8000-000000000001" },
+    { "key": "cashInAccount", "value": "00000000-0000-7000-8000-000000000002" },
+    { "key": "unknownWallet", "value": "00000000-0000-7000-8000-0000000000ff" }
+  ],
+  "item": [
+    {
+      "name": "0. Setup",
+      "description": "Creates four wallets. A: main sender, gets 300,000. B: receiver. C: starts empty. D: gets 5,000,001 for the large-fee cases.",
+      "item": [
+        {
+          "name": "Create wallet A [201]",
+          "event": [
+            { "listen": "prerequest", "script": { "type": "text/javascript", "exec": [
+              "pm.collectionVariables.set('runId', String(Date.now()));"
+            ] } },
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.collectionVariables.set('walletA', pm.response.json().id);",
+              "pm.test('balance is 0', () => pm.expect(pm.response.json().balance).to.eql(0));",
+              "pm.test('currency is IQD', () => pm.expect(pm.response.json().currency).to.eql('IQD'));",
+              "pm.test('status is ACTIVE', () => pm.expect(pm.response.json().status).to.eql('ACTIVE'));",
+              "pm.test('Location header points at the wallet', () => pm.expect(pm.response.headers.get('Location')).to.include(pm.response.json().id));"
+            ] } }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\"ownerId\":\"user-a\"}" },
+            "url": "{{baseUrl}}/api/v1/wallets"
+          }
+        },
+        {
+          "name": "Create wallet B [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.collectionVariables.set('walletB', pm.response.json().id);"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\"ownerId\":\"user-b\"}" },
+            "url": "{{baseUrl}}/api/v1/wallets"
+          }
+        },
+        {
+          "name": "Create wallet C [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.collectionVariables.set('walletC', pm.response.json().id);"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\"ownerId\":\"user-c\"}" },
+            "url": "{{baseUrl}}/api/v1/wallets"
+          }
+        },
+        {
+          "name": "Create wallet D [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.collectionVariables.set('walletD', pm.response.json().id);"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\"ownerId\":\"user-d\"}" },
+            "url": "{{baseUrl}}/api/v1/wallets"
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Wallets",
+      "item": [
+        {
+          "name": "Get wallet A [200]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('id matches', () => pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('walletA')));",
+            "pm.test('balance is 0', () => pm.expect(pm.response.json().balance).to.eql(0));"
+          ] } } ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/wallets/{{walletA}}" }
+        },
+        {
+          "name": "Get unknown wallet [404 WALLET_NOT_FOUND]",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/wallets/{{unknownWallet}}" }
+        },
+        {
+          "name": "Get system FEE account is hidden [404 WALLET_NOT_FOUND]",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/wallets/{{feeAccount}}" }
+        },
+        {
+          "name": "Get wallet with invalid id [400 MALFORMED_REQUEST]",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/wallets/not-a-uuid" }
+        },
+        {
+          "name": "Create wallet without ownerId [400 VALIDATION_FAILED]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/api/v1/wallets"
+          }
+        },
+        {
+          "name": "Create wallet with blank ownerId [400 VALIDATION_FAILED]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\"ownerId\":\"   \"}" },
+            "url": "{{baseUrl}}/api/v1/wallets"
+          }
+        },
+        {
+          "name": "Create wallet with ownerId over 64 chars [400 VALIDATION_FAILED]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\"ownerId\":\"abcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcde\"}" },
+            "url": "{{baseUrl}}/api/v1/wallets"
+          }
+        },
+        {
+          "name": "Create wallet with malformed JSON [400 MALFORMED_REQUEST]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\"ownerId\": " },
+            "url": "{{baseUrl}}/api/v1/wallets"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Deposits",
+      "item": [
+        {
+          "name": "Deposit 300,000 into A [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.collectionVariables.set('depositId', pm.response.json().depositId);",
+            "pm.test('amount is 300000', () => pm.expect(pm.response.json().amount).to.eql(300000));",
+            "pm.test('balance is 300000', () => pm.expect(pm.response.json().balance).to.eql(300000));"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-dep-a" } ],
+            "body": { "mode": "raw", "raw": "{\"amount\":300000}" },
+            "url": "{{baseUrl}}/api/v1/wallets/{{walletA}}/deposits"
+          }
+        },
+        {
+          "name": "Retry same deposit, same key: replayed, not doubled [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('same depositId as the first call', () => pm.expect(pm.response.json().depositId).to.eql(pm.collectionVariables.get('depositId')));",
+            "pm.test('balance is still 300000', () => pm.expect(pm.response.json().balance).to.eql(300000));"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-dep-a" } ],
+            "body": { "mode": "raw", "raw": "{\"amount\":300000}" },
+            "url": "{{baseUrl}}/api/v1/wallets/{{walletA}}/deposits"
+          }
+        },
+        {
+          "name": "Same key, different amount [422 IDEMPOTENCY_KEY_REUSED]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-dep-a" } ],
+            "body": { "mode": "raw", "raw": "{\"amount\":999}" },
+            "url": "{{baseUrl}}/api/v1/wallets/{{walletA}}/deposits"
+          }
+        },
+        {
+          "name": "Wallet A balance is 300,000 after the retries [200]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('balance is 300000', () => pm.expect(pm.response.json().balance).to.eql(300000));"
+          ] } } ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/wallets/{{walletA}}" }
+        },
+        {
+          "name": "Deposit maximum 5,000,000 into D [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('balance is 5000000', () => pm.expect(pm.response.json().balance).to.eql(5000000));"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-dep-d-max" } ],
+            "body": { "mode": "raw", "raw": "{\"amount\":5000000}" },
+            "url": "{{baseUrl}}/api/v1/wallets/{{walletD}}/deposits"
+          }
+        },
+        {
+          "name": "Deposit minimum 1 into D [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('balance is 5000001', () => pm.expect(pm.response.json().balance).to.eql(5000001));"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-dep-d-min" } ],
+            "body": { "mode": "raw", "raw": "{\"amount\":1}" },
+            "url": "{{baseUrl}}/api/v1/wallets/{{walletD}}/deposits"
+          }
+        },
+        {
+          "name": "Deposit amount 0 [400 INVALID_AMOUNT]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-dep-zero" } ],
+            "body": { "mode": "raw", "raw": "{\"amount\":0}" },
+            "url": "{{baseUrl}}/api/v1/wallets/{{walletA}}/deposits"
+          }
+        },
+        {
+          "name": "Deposit negative amount [400 INVALID_AMOUNT]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-dep-neg" } ],
+            "body": { "mode": "raw", "raw": "{\"amount\":-5}" },
+            "url": "{{baseUrl}}/api/v1/wallets/{{walletA}}/deposits"
+          }
+        },
+        {
+          "name": "Deposit above maximum 5,000,001 [400 INVALID_AMOUNT]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-dep-over" } ],
+            "body": { "mode": "raw", "raw": "{\"amount\":5000001}" },
+            "url": "{{baseUrl}}/api/v1/wallets/{{walletA}}/deposits"
+          }
+        },
+        {
+          "name": "Deposit decimal 100.5 is not truncated [400 MALFORMED_REQUEST]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-dep-decimal" } ],
+            "body": { "mode": "raw", "raw": "{\"amount\":100.5}" },
+            "url": "{{baseUrl}}/api/v1/wallets/{{walletA}}/deposits"
+          }
+        },
+        {
+          "name": "Deposit amount as string \"1000\" [400 MALFORMED_REQUEST]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-dep-string" } ],
+            "body": { "mode": "raw", "raw": "{\"amount\":\"1000\"}" },
+            "url": "{{baseUrl}}/api/v1/wallets/{{walletA}}/deposits"
+          }
+        },
+        {
+          "name": "Deposit amount null [400 VALIDATION_FAILED]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-dep-null" } ],
+            "body": { "mode": "raw", "raw": "{\"amount\":null}" },
+            "url": "{{baseUrl}}/api/v1/wallets/{{walletA}}/deposits"
+          }
+        },
+        {
+          "name": "Deposit without Idempotency-Key [400 IDEMPOTENCY_KEY_MISSING]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/wallets/{{walletA}}/deposits"
+          }
+        },
+        {
+          "name": "Deposit with Idempotency-Key over 100 chars [400 VALIDATION_FAILED]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "k0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789" } ],
+            "body": { "mode": "raw", "raw": "{\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/wallets/{{walletA}}/deposits"
+          }
+        },
+        {
+          "name": "Deposit into unknown wallet [404 WALLET_NOT_FOUND]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-dep-unknown" } ],
+            "body": { "mode": "raw", "raw": "{\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/wallets/{{unknownWallet}}/deposits"
+          }
+        },
+        {
+          "name": "Deposit into system FEE account [422 SYSTEM_ACCOUNT_NOT_ALLOWED]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-dep-fee" } ],
+            "body": { "mode": "raw", "raw": "{\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/wallets/{{feeAccount}}/deposits"
+          }
+        },
+        {
+          "name": "Deposit into system CASH_IN account [422 SYSTEM_ACCOUNT_NOT_ALLOWED]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-dep-cashin" } ],
+            "body": { "mode": "raw", "raw": "{\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/wallets/{{cashInAccount}}/deposits"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Transfers",
+      "description": "Fee is 0.5% of the amount, rounded HALF_UP, clamped to [250, 10,000]. The sender pays amount + fee.",
+      "item": [
+        {
+          "name": "Transfer 10,000 A to B, fee 250 [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.collectionVariables.set('transferId', pm.response.json().transferId);",
+            "pm.test('fee is 250', () => pm.expect(pm.response.json().fee).to.eql(250));",
+            "pm.test('totalDebited is 10250', () => pm.expect(pm.response.json().totalDebited).to.eql(10250));",
+            "pm.test('senderBalance is 289750', () => pm.expect(pm.response.json().senderBalance).to.eql(289750));"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-1" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletA}}\",\"toWalletId\":\"{{walletB}}\",\"amount\":10000}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Retry same transfer, same key: replayed, not doubled [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('same transferId as the first call', () => pm.expect(pm.response.json().transferId).to.eql(pm.collectionVariables.get('transferId')));",
+            "pm.test('senderBalance is still 289750', () => pm.expect(pm.response.json().senderBalance).to.eql(289750));"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-1" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletA}}\",\"toWalletId\":\"{{walletB}}\",\"amount\":10000}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Same key, different amount [422 IDEMPOTENCY_KEY_REUSED]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-1" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletA}}\",\"toWalletId\":\"{{walletB}}\",\"amount\":5000}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Wallet A is 289,750 after the retries [200]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('balance is 289750', () => pm.expect(pm.response.json().balance).to.eql(289750));"
+          ] } } ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/wallets/{{walletA}}" }
+        },
+        {
+          "name": "Wallet B is 10,000 [200]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('balance is 10000', () => pm.expect(pm.response.json().balance).to.eql(10000));"
+          ] } } ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/wallets/{{walletB}}" }
+        },
+        {
+          "name": "Fee minimum: transfer 1, fee 250 [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('fee is 250', () => pm.expect(pm.response.json().fee).to.eql(250));",
+            "pm.test('totalDebited is 251', () => pm.expect(pm.response.json().totalDebited).to.eql(251));",
+            "pm.test('senderBalance is 289499', () => pm.expect(pm.response.json().senderBalance).to.eql(289499));"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-fee-min" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletA}}\",\"toWalletId\":\"{{walletB}}\",\"amount\":1}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Fee rounds half up: transfer 50,100, fee 250.5 becomes 251 [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('fee is 251', () => pm.expect(pm.response.json().fee).to.eql(251));",
+            "pm.test('totalDebited is 50351', () => pm.expect(pm.response.json().totalDebited).to.eql(50351));",
+            "pm.test('senderBalance is 239148', () => pm.expect(pm.response.json().senderBalance).to.eql(239148));"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-fee-round" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletA}}\",\"toWalletId\":\"{{walletB}}\",\"amount\":50100}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Fee 0.5%: transfer 100,000, fee 500 [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('fee is 500', () => pm.expect(pm.response.json().fee).to.eql(500));",
+            "pm.test('totalDebited is 100500', () => pm.expect(pm.response.json().totalDebited).to.eql(100500));",
+            "pm.test('senderBalance is 138648', () => pm.expect(pm.response.json().senderBalance).to.eql(138648));"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-fee-mid" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletA}}\",\"toWalletId\":\"{{walletB}}\",\"amount\":100000}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Fee maximum: transfer 3,000,000 D to B, fee 10,000 not 15,000 [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('fee is 10000', () => pm.expect(pm.response.json().fee).to.eql(10000));",
+            "pm.test('totalDebited is 3010000', () => pm.expect(pm.response.json().totalDebited).to.eql(3010000));",
+            "pm.test('senderBalance is 1990001', () => pm.expect(pm.response.json().senderBalance).to.eql(1990001));"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-fee-max" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletD}}\",\"toWalletId\":\"{{walletB}}\",\"amount\":3000000}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Transfer more than the balance [422 INSUFFICIENT_FUNDS]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-too-much" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletD}}\",\"toWalletId\":\"{{walletB}}\",\"amount\":5000000}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Transfer from empty wallet C [422 INSUFFICIENT_FUNDS]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-poor" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletC}}\",\"toWalletId\":\"{{walletA}}\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Deposit 50,000 into C [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('balance is 50000', () => pm.expect(pm.response.json().balance).to.eql(50000));"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-dep-c" } ],
+            "body": { "mode": "raw", "raw": "{\"amount\":50000}" },
+            "url": "{{baseUrl}}/api/v1/wallets/{{walletC}}/deposits"
+          }
+        },
+        {
+          "name": "Retry rejected transfer after funding: stored rejection replayed [422 INSUFFICIENT_FUNDS]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-poor" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletC}}\",\"toWalletId\":\"{{walletA}}\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Transfer exactly the whole balance: 49,750 + fee 250 from C [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('totalDebited is 50000', () => pm.expect(pm.response.json().totalDebited).to.eql(50000));",
+            "pm.test('senderBalance is 0', () => pm.expect(pm.response.json().senderBalance).to.eql(0));"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-exact" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletC}}\",\"toWalletId\":\"{{walletA}}\",\"amount\":49750}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Transfer to the same wallet [422 SAME_WALLET]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-same" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletA}}\",\"toWalletId\":\"{{walletA}}\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Transfer to system FEE account [422 SYSTEM_ACCOUNT_NOT_ALLOWED]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-to-fee" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletA}}\",\"toWalletId\":\"{{feeAccount}}\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Transfer from system CASH_IN account [422 SYSTEM_ACCOUNT_NOT_ALLOWED]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-from-cashin" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{cashInAccount}}\",\"toWalletId\":\"{{walletA}}\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Transfer to unknown wallet [404 WALLET_NOT_FOUND]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-unknown" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletA}}\",\"toWalletId\":\"{{unknownWallet}}\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Transfer without toWalletId [400 VALIDATION_FAILED]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-no-to" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletA}}\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Transfer with invalid wallet id [400 MALFORMED_REQUEST]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-bad-id" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletA}}\",\"toWalletId\":\"not-a-uuid\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Transfer decimal 100.5 [400 MALFORMED_REQUEST]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-decimal" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletA}}\",\"toWalletId\":\"{{walletB}}\",\"amount\":100.5}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Transfer amount 0 [400 INVALID_AMOUNT]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-zero" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletA}}\",\"toWalletId\":\"{{walletB}}\",\"amount\":0}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Transfer above maximum 5,000,001 [400 INVALID_AMOUNT]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-tr-over" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletA}}\",\"toWalletId\":\"{{walletB}}\",\"amount\":5000001}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Transfer without Idempotency-Key [400 IDEMPOTENCY_KEY_MISSING]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletA}}\",\"toWalletId\":\"{{walletB}}\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Final balance A is 188,398 [200]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('balance is 188398', () => pm.expect(pm.response.json().balance).to.eql(188398));"
+          ] } } ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/wallets/{{walletA}}" }
+        },
+        {
+          "name": "Final balance B is 3,160,101 [200]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('balance is 3160101', () => pm.expect(pm.response.json().balance).to.eql(3160101));"
+          ] } } ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/wallets/{{walletB}}" }
+        },
+        {
+          "name": "Final balance C is 0 [200]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('balance is 0', () => pm.expect(pm.response.json().balance).to.eql(0));"
+          ] } } ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/wallets/{{walletC}}" }
+        },
+        {
+          "name": "Final balance D is 1,990,001 [200]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('balance is 1990001', () => pm.expect(pm.response.json().balance).to.eql(1990001));"
+          ] } } ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/wallets/{{walletD}}" }
+        }
+      ]
+    },
+    {
+      "name": "4. Bill payments",
+      "description": "Bill payments carry no fee. The locally running service uses LoggingBillerClient, which approves every payment, so only SUCCEEDED is reachable here. Declines, timeouts (202 UNKNOWN) and reconciliation are covered by BillPaymentIT, BillPaymentRecoveryIT and BillPaymentReconciliationIT with the fake biller.",
+      "item": [
+        {
+          "name": "Pay 5,000 bill from A [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.collectionVariables.set('paymentId', pm.response.json().paymentId);",
+            "pm.test('status is SUCCEEDED', () => pm.expect(pm.response.json().status).to.eql('SUCCEEDED'));",
+            "pm.test('amount is 5000', () => pm.expect(pm.response.json().amount).to.eql(5000));"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-bill-1" } ],
+            "body": { "mode": "raw", "raw": "{\"walletId\":\"{{walletA}}\",\"billerReference\":\"ELEC-123\",\"amount\":5000}" },
+            "url": "{{baseUrl}}/api/v1/bill-payments"
+          }
+        },
+        {
+          "name": "Retry same bill payment, same key: replayed, paid once [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('same paymentId as the first call', () => pm.expect(pm.response.json().paymentId).to.eql(pm.collectionVariables.get('paymentId')));",
+            "pm.test('status is SUCCEEDED', () => pm.expect(pm.response.json().status).to.eql('SUCCEEDED'));"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-bill-1" } ],
+            "body": { "mode": "raw", "raw": "{\"walletId\":\"{{walletA}}\",\"billerReference\":\"ELEC-123\",\"amount\":5000}" },
+            "url": "{{baseUrl}}/api/v1/bill-payments"
+          }
+        },
+        {
+          "name": "Same key, different amount [422 IDEMPOTENCY_KEY_REUSED]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-bill-1" } ],
+            "body": { "mode": "raw", "raw": "{\"walletId\":\"{{walletA}}\",\"billerReference\":\"ELEC-123\",\"amount\":7000}" },
+            "url": "{{baseUrl}}/api/v1/bill-payments"
+          }
+        },
+        {
+          "name": "Wallet A is 183,398: debited 5,000 once, no fee [200]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('balance is 183398', () => pm.expect(pm.response.json().balance).to.eql(183398));"
+          ] } } ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/wallets/{{walletA}}" }
+        },
+        {
+          "name": "Bill payment from empty wallet C [422 INSUFFICIENT_FUNDS]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-bill-poor" } ],
+            "body": { "mode": "raw", "raw": "{\"walletId\":\"{{walletC}}\",\"billerReference\":\"ELEC-123\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/bill-payments"
+          }
+        },
+        {
+          "name": "Bill payment from system FEE account [422 SYSTEM_ACCOUNT_NOT_ALLOWED]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-bill-fee" } ],
+            "body": { "mode": "raw", "raw": "{\"walletId\":\"{{feeAccount}}\",\"billerReference\":\"ELEC-123\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/bill-payments"
+          }
+        },
+        {
+          "name": "Bill payment from unknown wallet [404 WALLET_NOT_FOUND]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-bill-unknown" } ],
+            "body": { "mode": "raw", "raw": "{\"walletId\":\"{{unknownWallet}}\",\"billerReference\":\"ELEC-123\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/bill-payments"
+          }
+        },
+        {
+          "name": "Bill payment without walletId [400 VALIDATION_FAILED]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-bill-no-wallet" } ],
+            "body": { "mode": "raw", "raw": "{\"billerReference\":\"ELEC-123\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/bill-payments"
+          }
+        },
+        {
+          "name": "Bill payment without billerReference [400 VALIDATION_FAILED]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-bill-no-ref" } ],
+            "body": { "mode": "raw", "raw": "{\"walletId\":\"{{walletA}}\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/bill-payments"
+          }
+        },
+        {
+          "name": "Bill payment with billerReference over 64 chars [400 VALIDATION_FAILED]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-bill-long-ref" } ],
+            "body": { "mode": "raw", "raw": "{\"walletId\":\"{{walletA}}\",\"billerReference\":\"abcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcde\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/bill-payments"
+          }
+        },
+        {
+          "name": "Bill payment amount 0 [400 INVALID_AMOUNT]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-bill-zero" } ],
+            "body": { "mode": "raw", "raw": "{\"walletId\":\"{{walletA}}\",\"billerReference\":\"ELEC-123\",\"amount\":0}" },
+            "url": "{{baseUrl}}/api/v1/bill-payments"
+          }
+        },
+        {
+          "name": "Bill payment decimal 100.5 [400 MALFORMED_REQUEST]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-bill-decimal" } ],
+            "body": { "mode": "raw", "raw": "{\"walletId\":\"{{walletA}}\",\"billerReference\":\"ELEC-123\",\"amount\":100.5}" },
+            "url": "{{baseUrl}}/api/v1/bill-payments"
+          }
+        },
+        {
+          "name": "Bill payment without Idempotency-Key [400 IDEMPOTENCY_KEY_MISSING]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\"walletId\":\"{{walletA}}\",\"billerReference\":\"ELEC-123\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/bill-payments"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Frozen wallet (manual step first)",
+      "description": "There is no endpoint to freeze a wallet (the brief does not ask for one), so freeze wallet B in the database before running this folder. Copy B's id from the collection variable `walletB`, then run:\n\n```\ndocker exec wallet-service-postgres-1 psql -U wallet -d wallet -c \"UPDATE accounts SET status = 'FROZEN' WHERE id = '<walletB>'\"\n```\n\nA frozen wallet cannot send (transfer or bill payment) but can still receive (transfer in, deposit).",
+      "item": [
+        {
+          "name": "Wallet B shows FROZEN [200]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('status is FROZEN', () => pm.expect(pm.response.json().status).to.eql('FROZEN'));"
+          ] } } ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/wallets/{{walletB}}" }
+        },
+        {
+          "name": "Transfer from frozen B [422 WALLET_FROZEN]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-frozen-send" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletB}}\",\"toWalletId\":\"{{walletA}}\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Bill payment from frozen B [422 WALLET_FROZEN]",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-frozen-bill" } ],
+            "body": { "mode": "raw", "raw": "{\"walletId\":\"{{walletB}}\",\"billerReference\":\"ELEC-123\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/bill-payments"
+          }
+        },
+        {
+          "name": "Transfer to frozen B is allowed [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('senderBalance is 182148', () => pm.expect(pm.response.json().senderBalance).to.eql(182148));"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-frozen-receive" } ],
+            "body": { "mode": "raw", "raw": "{\"fromWalletId\":\"{{walletA}}\",\"toWalletId\":\"{{walletB}}\",\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/transfers"
+          }
+        },
+        {
+          "name": "Deposit into frozen B is allowed [201]",
+          "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('balance is 3162101', () => pm.expect(pm.response.json().balance).to.eql(3162101));"
+          ] } } ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "{{runId}}-frozen-deposit" } ],
+            "body": { "mode": "raw", "raw": "{\"amount\":1000}" },
+            "url": "{{baseUrl}}/api/v1/wallets/{{walletB}}/deposits"
+          }
+        }
+      ]
+    }
+  ]
+}
