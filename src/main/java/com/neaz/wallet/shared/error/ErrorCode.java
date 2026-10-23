@@ -13,6 +13,9 @@ public enum ErrorCode {
     WALLET_NOT_FOUND(404),
     IDEMPOTENCY_KEY_REUSED(422),
     SYSTEM_ACCOUNT_NOT_ALLOWED(422),
+    SAME_WALLET(422),
+    WALLET_FROZEN(422),
+    INSUFFICIENT_FUNDS(422),
     INTERNAL_ERROR(500);
 
     private final int httpStatus;
