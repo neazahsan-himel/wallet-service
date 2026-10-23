@@ -89,6 +89,31 @@ class LedgerServiceIT extends AbstractIntegrationTest {
         assertThat(data.storedBalance(receiver)).isZero();
     }
 
+    @Test
+    void reversingEntryIsStoredWithALinkToTheOriginal() {
+        UUID wallet = data.wallet();
+        UUID reference = UUID.randomUUID();
+
+        var original = tx.execute(status -> {
+            accountService.lockForUpdate(wallet);
+            return ledgerService.post(Posting.of(EntryType.DEPOSIT, ReferenceType.DEPOSIT, reference)
+                    .debit(SystemAccounts.CASH_IN, 1_000).credit(wallet, 1_000).build());
+        });
+        var reversal = tx.execute(status -> {
+            accountService.lockForUpdate(wallet);
+            return ledgerService.post(Posting.of(EntryType.BILL_PAYMENT_REFUND, ReferenceType.DEPOSIT, reference)
+                    .debit(wallet, 1_000).credit(SystemAccounts.CASH_IN, 1_000)
+                    .reverses(original.id())
+                    .build());
+        });
+
+        UUID stored = jdbc.sql("SELECT reverses_entry_id FROM journal_entries WHERE id = :id")
+                .param("id", reversal.id())
+                .query(UUID.class).single();
+        assertThat(stored).isEqualTo(original.id());
+        assertThat(data.storedBalance(wallet)).isZero();
+    }
+
     private static Posting deposit(UUID wallet, long amount) {
         return Posting.of(EntryType.DEPOSIT, ReferenceType.DEPOSIT, UUID.randomUUID())
                 .debit(SystemAccounts.CASH_IN, amount)

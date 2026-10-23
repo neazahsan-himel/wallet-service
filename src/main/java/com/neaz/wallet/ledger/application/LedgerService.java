@@ -32,7 +32,8 @@ public class LedgerService {
     @Transactional(propagation = Propagation.MANDATORY)
     public JournalEntry post(Posting posting) {
         var entry = new JournalEntry(
-                Ids.newId(), posting.type(), posting.referenceType(), posting.referenceId(), clock.instant());
+                Ids.newId(), posting.type(), posting.referenceType(), posting.referenceId(), posting.reversesEntryId(),
+                clock.instant());
         ledger.insert(entry, posting.lines());
         return entry;
     }

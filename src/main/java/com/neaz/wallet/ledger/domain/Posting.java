@@ -25,12 +25,15 @@ public final class Posting {
     private final EntryType type;
     private final ReferenceType referenceType;
     private final UUID referenceId;
+    private final UUID reversesEntryId;
     private final List<LedgerLine> lines;
 
-    private Posting(EntryType type, ReferenceType referenceType, UUID referenceId, List<LedgerLine> lines) {
+    private Posting(EntryType type, ReferenceType referenceType, UUID referenceId, UUID reversesEntryId,
+                    List<LedgerLine> lines) {
         this.type = type;
         this.referenceType = referenceType;
         this.referenceId = referenceId;
+        this.reversesEntryId = reversesEntryId;
         this.lines = List.copyOf(lines);
     }
 
@@ -50,6 +53,11 @@ public final class Posting {
         return referenceId;
     }
 
+    /** The entry this one undoes, or null for an ordinary movement. */
+    public UUID reversesEntryId() {
+        return reversesEntryId;
+    }
+
     public List<LedgerLine> lines() {
         return lines;
     }
@@ -60,6 +68,7 @@ public final class Posting {
         private final ReferenceType referenceType;
         private final UUID referenceId;
         private final List<LedgerLine> lines = new ArrayList<>();
+        private UUID reversesEntryId;
 
         private Builder(EntryType type, ReferenceType referenceType, UUID referenceId) {
             this.type = Objects.requireNonNull(type, "type");
@@ -79,6 +88,15 @@ public final class Posting {
             return this;
         }
 
+        /**
+         * Marks this posting as a correction of an earlier entry. History is never edited, so undoing money
+         * (e.g. refunding a bill payment hold) is a new entry that points back at the one it reverses.
+         */
+        public Builder reverses(UUID entryId) {
+            this.reversesEntryId = Objects.requireNonNull(entryId, "entryId");
+            return this;
+        }
+
         public Posting build() {
             if (lines.size() < 2) {
                 throw new IllegalStateException("a posting needs at least two lines, had " + lines.size());
@@ -91,7 +109,7 @@ public final class Posting {
                 throw new IllegalStateException(
                         "posting " + type + " " + referenceId + " does not balance: sum is " + sum);
             }
-            return new Posting(type, referenceType, referenceId, lines);
+            return new Posting(type, referenceType, referenceId, reversesEntryId, lines);
         }
 
         private static long requirePositive(long amount) {

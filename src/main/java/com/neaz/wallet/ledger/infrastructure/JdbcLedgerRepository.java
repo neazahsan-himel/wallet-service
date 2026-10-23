@@ -28,13 +28,14 @@ public class JdbcLedgerRepository implements LedgerRepository {
         var createdAt = OffsetDateTime.ofInstant(entry.createdAt(), ZoneOffset.UTC);
 
         jdbc.sql("""
-                        INSERT INTO journal_entries (id, type, reference_type, reference_id, created_at)
-                        VALUES (:id, :type, :referenceType, :referenceId, :createdAt)
+                        INSERT INTO journal_entries (id, type, reference_type, reference_id, reverses_entry_id, created_at)
+                        VALUES (:id, :type, :referenceType, :referenceId, :reversesEntryId, :createdAt)
                         """)
                 .param("id", entry.id())
                 .param("type", entry.type().name())
                 .param("referenceType", entry.referenceType().name())
                 .param("referenceId", entry.referenceId())
+                .param("reversesEntryId", entry.reversesEntryId())
                 .param("createdAt", createdAt)
                 .update();
 

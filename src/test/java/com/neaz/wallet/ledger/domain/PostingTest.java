@@ -68,6 +68,29 @@ class PostingTest {
     }
 
     @Test
+    void ordinaryPostingReversesNothing() {
+        var posting = Posting.of(EntryType.DEPOSIT, ReferenceType.DEPOSIT, UUID.randomUUID())
+                .debit(SENDER, 100)
+                .credit(RECEIVER, 100)
+                .build();
+
+        assertThat(posting.reversesEntryId()).isNull();
+    }
+
+    @Test
+    void reversingPostingPointsAtTheEntryItUndoes() {
+        var original = UUID.randomUUID();
+
+        var posting = Posting.of(EntryType.BILL_PAYMENT_REFUND, ReferenceType.BILL_PAYMENT, UUID.randomUUID())
+                .debit(RECEIVER, 100)
+                .credit(SENDER, 100)
+                .reverses(original)
+                .build();
+
+        assertThat(posting.reversesEntryId()).isEqualTo(original);
+    }
+
+    @Test
     void linesCannotBeModifiedAfterBuild() {
         var posting = Posting.of(EntryType.DEPOSIT, ReferenceType.DEPOSIT, UUID.randomUUID())
                 .debit(SENDER, 100)
