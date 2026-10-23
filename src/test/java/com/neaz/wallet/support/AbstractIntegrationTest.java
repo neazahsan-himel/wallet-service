@@ -55,7 +55,7 @@ public abstract class AbstractIntegrationTest {
     void cleanDatabase() {
         // TRUNCATE is not a row-level UPDATE/DELETE, so the append-only triggers do not block it.
         // In production the application role would not be granted TRUNCATE (see DECISIONS D8).
-        jdbc.sql("TRUNCATE ledger_lines, journal_entries").update();
+        jdbc.sql("TRUNCATE ledger_lines, journal_entries, idempotency_keys").update();
         jdbc.sql("DELETE FROM accounts WHERE type = 'CUSTOMER'").update();
         data = new TestDataFactory(accountService, ledgerService, jdbc, tx);
     }

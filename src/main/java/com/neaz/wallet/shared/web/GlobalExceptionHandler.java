@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -43,6 +44,14 @@ public class GlobalExceptionHandler {
     ResponseEntity<ProblemDetail> handleMalformed(Exception ex) {
         // The parser message can echo request content, so the client gets a generic detail.
         return problem(ErrorCode.MALFORMED_REQUEST, "request could not be read");
+    }
+
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    ResponseEntity<ProblemDetail> handleMissingHeader(MissingRequestHeaderException ex) {
+        if (IdempotencyHeader.NAME.equalsIgnoreCase(ex.getHeaderName())) {
+            return problem(ErrorCode.IDEMPOTENCY_KEY_MISSING, IdempotencyHeader.NAME + " header is required");
+        }
+        return problem(ErrorCode.VALIDATION_FAILED, ex.getHeaderName() + " header is required");
     }
 
     @ExceptionHandler(Exception.class)
