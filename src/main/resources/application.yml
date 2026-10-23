@@ -33,3 +33,5 @@ wallet:
     lease: PT30S
     # When the biller's answer is unknown, ask again after this long.
     recheck-interval: PT1M
+    reconcile-interval: PT10S
+    batch-size: 50

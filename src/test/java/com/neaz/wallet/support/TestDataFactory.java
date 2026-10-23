@@ -58,6 +58,17 @@ public final class TestDataFactory {
                 .update();
     }
 
+    /**
+     * Makes every open bill payment due now, as if its lease or recheck delay had run out. Stands in for waiting:
+     * the reconciler only picks up rows whose {@code locked_until} has passed.
+     */
+    public void expireBillPaymentLeases() {
+        jdbc.sql("""
+                UPDATE bill_payments SET locked_until = TIMESTAMPTZ '2000-01-01 00:00:00Z'
+                WHERE status IN ('PENDING', 'UNKNOWN')
+                """).update();
+    }
+
     public long storedBalance(UUID accountId) {
         return jdbc.sql("SELECT balance FROM accounts WHERE id = :id")
                 .param("id", accountId)

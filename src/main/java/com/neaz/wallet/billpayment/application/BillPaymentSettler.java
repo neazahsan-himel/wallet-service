@@ -33,8 +33,8 @@ import java.util.UUID;
  * orchestrator's calls go through the Spring proxy and each step really is its own transaction
  * (self-invocation trap, CLAUDE.md 4.6 rule 6).
  *
- * <p>{@link #apply} is shared by the live request and the reconciler, so there is one piece of settlement code
- * whichever path learns the biller's answer.
+ * <p>{@link #apply} is shared by the live request and the {@link BillPaymentReconciler}, so there is one piece of
+ * settlement code whichever path learns the biller's answer.
  */
 @Service
 public class BillPaymentSettler {

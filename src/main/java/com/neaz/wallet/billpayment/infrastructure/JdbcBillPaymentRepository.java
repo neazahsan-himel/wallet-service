@@ -10,6 +10,9 @@ import org.springframework.stereotype.Repository;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -83,6 +86,37 @@ public class JdbcBillPaymentRepository implements BillPaymentRepository {
                 .param("from", from)
                 .query(ROW_MAPPER)
                 .optional();
+    }
+
+    /**
+     * One statement, so selecting and leasing cannot be split by another worker. SKIP LOCKED makes a concurrent
+     * reconciler (or a live request settling a row) pass over rows that are locked right now instead of waiting.
+     * If the other worker commits first, the row lock re-checks the WHERE clause on the new row version, sees the
+     * fresh lease or the final status, and skips the row.
+     */
+    @Override
+    public List<BillPayment> claimDue(int limit, Instant now, Instant leaseUntil) {
+        var open = Arrays.stream(BillPaymentStatus.values())
+                .filter(BillPaymentStatus::isOpen).map(Enum::name).toList();
+        List<BillPayment> claimed = jdbc.sql("""
+                        UPDATE bill_payments
+                        SET locked_until = :leaseUntil, attempts = attempts + 1, updated_at = :now
+                        WHERE id IN (
+                            SELECT id FROM bill_payments
+                            WHERE status IN (:open) AND locked_until <= :now
+                            ORDER BY locked_until
+                            LIMIT :limit
+                            FOR UPDATE SKIP LOCKED)
+                        RETURNING *
+                        """)
+                .param("leaseUntil", utc(leaseUntil))
+                .param("now", utc(now))
+                .param("open", open)
+                .param("limit", limit)
+                .query(ROW_MAPPER)
+                .list();
+        // RETURNING does not keep the subquery's order.
+        return claimed.stream().sorted(Comparator.comparing(BillPayment::createdAt)).toList();
     }
 
     private static OffsetDateTime utc(Instant instant) {
