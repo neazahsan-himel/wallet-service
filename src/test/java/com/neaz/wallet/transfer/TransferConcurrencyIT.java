@@ -36,6 +36,9 @@ class TransferConcurrencyIT extends AbstractIntegrationTest {
         assertThat(ledgerService.balanceOf(SystemAccounts.FEE)).isEqualTo(7_250);
         assertThat(count("SELECT COUNT(*) FROM transfers")).isEqualTo(29);
         assertThat(count("SELECT COUNT(*) FROM journal_entries WHERE type = 'TRANSFER'")).isEqualTo(29);
+        assertThat(count("SELECT COUNT(*) FROM outbox_events WHERE event_type = 'TRANSFER_COMPLETED'"))
+                .as("one notification per committed transfer, none for rejections")
+                .isEqualTo(29);
         assertThat(count("SELECT COUNT(*) FROM idempotency_keys WHERE scope = 'TRANSFER' AND status = 'COMPLETED'"))
                 .as("every attempt, accepted or rejected, has its outcome stored")
                 .isEqualTo(50);

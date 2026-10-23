@@ -35,6 +35,7 @@ class TransferRetryIT extends AbstractIntegrationTest {
                 WHERE e.type = 'TRANSFER'
                 """)).isEqualTo(3);
         assertThat(count("SELECT COUNT(*) FROM idempotency_keys WHERE scope = 'TRANSFER'")).isEqualTo(1);
+        assertThat(count("SELECT COUNT(*) FROM outbox_events")).isEqualTo(1);
 
         assertThat(data.storedBalance(from)).isEqualTo(89_750);
         assertThat(data.storedBalance(to)).isEqualTo(10_000);
@@ -53,6 +54,7 @@ class TransferRetryIT extends AbstractIntegrationTest {
             assertThat(response.getResponseBody()).contains("INSUFFICIENT_FUNDS");
         });
         assertThat(count("SELECT COUNT(*) FROM transfers")).isZero();
+        assertThat(count("SELECT COUNT(*) FROM outbox_events")).isZero();
         assertThat(count("SELECT COUNT(*) FROM idempotency_keys WHERE scope = 'TRANSFER'")).isEqualTo(1);
         assertThat(data.storedBalance(from)).isEqualTo(5_000);
     }

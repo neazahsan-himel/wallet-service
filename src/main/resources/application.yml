@@ -17,3 +17,13 @@ spring:
 
 server:
   port: 8088
+
+wallet:
+  scheduling:
+    # Integration tests set this to false and run the jobs by hand.
+    enabled: true
+  outbox:
+    poll-interval: PT1S
+    batch-size: 100
+    # Must comfortably exceed the time to send one batch, or a slow batch is re-leased and sent twice.
+    lease: PT30S

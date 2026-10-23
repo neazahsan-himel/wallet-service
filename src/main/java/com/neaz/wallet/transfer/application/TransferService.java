@@ -9,6 +9,8 @@ import com.neaz.wallet.ledger.application.LedgerService;
 import com.neaz.wallet.ledger.domain.EntryType;
 import com.neaz.wallet.ledger.domain.Posting;
 import com.neaz.wallet.ledger.domain.ReferenceType;
+import com.neaz.wallet.outbox.application.OutboxWriter;
+import com.neaz.wallet.outbox.domain.EventType;
 import com.neaz.wallet.shared.kernel.Ids;
 import com.neaz.wallet.transfer.application.port.TransferRepository;
 import com.neaz.wallet.transfer.domain.FeePolicy;
@@ -31,20 +33,23 @@ public class TransferService {
     private final AccountService accounts;
     private final LedgerService ledger;
     private final TransferRepository transfers;
+    private final OutboxWriter outbox;
     private final FeePolicy feePolicy;
 
     public TransferService(IdempotencyService idempotency, AccountService accounts, LedgerService ledger,
-                           TransferRepository transfers) {
+                           TransferRepository transfers, OutboxWriter outbox) {
         this.idempotency = idempotency;
         this.accounts = accounts;
         this.ledger = ledger;
         this.transfers = transfers;
+        this.outbox = outbox;
         // Pure, stateless domain rule with no Spring dependency, so it is created here rather than injected.
         this.feePolicy = new FeePolicy();
     }
 
     /**
-     * One transaction: claim key, lock both wallets, check, post, insert transfer row, store result.
+     * One transaction: claim key, lock both wallets, check, post, insert transfer row, write outbox event,
+     * store result.
      * An unknown wallet throws and rolls back the claim too, so nothing is stored and a retry gets the same 404.
      */
     @Transactional
@@ -85,6 +90,8 @@ public class TransferService {
 
         var transfer = new Transfer(transferId, from.id(), to.id(), amount, fee, entry.createdAt());
         transfers.insert(transfer);
+        // Same transaction as the money: the notification exists if and only if the transfer committed.
+        outbox.write(EventType.TRANSFER_COMPLETED, transferId, TransferCompletedEvent.from(transfer));
 
         var completed = new TransferResult.Completed(transferId, from.id(), to.id(), amount, fee, total,
                 Math.subtractExact(from.balance(), total), transfer.createdAt());

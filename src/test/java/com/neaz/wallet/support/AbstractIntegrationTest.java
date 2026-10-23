@@ -22,8 +22,11 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  *
  * <p>Every test starts from empty tables (system accounts kept) and ends by checking the ledger invariants,
  * so no test can leave the books unbalanced without failing.
+ *
+ * <p>Scheduled jobs are switched off; tests that need the outbox publisher call it directly.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "wallet.scheduling.enabled=false")
 @AutoConfigureRestTestClient
 public abstract class AbstractIntegrationTest {
 
@@ -55,7 +58,7 @@ public abstract class AbstractIntegrationTest {
     void cleanDatabase() {
         // TRUNCATE is not a row-level UPDATE/DELETE, so the append-only triggers do not block it.
         // In production the application role would not be granted TRUNCATE (see DECISIONS D8).
-        jdbc.sql("TRUNCATE ledger_lines, journal_entries, idempotency_keys, transfers").update();
+        jdbc.sql("TRUNCATE ledger_lines, journal_entries, idempotency_keys, transfers, outbox_events").update();
         jdbc.sql("DELETE FROM accounts WHERE type = 'CUSTOMER'").update();
         data = new TestDataFactory(accountService, ledgerService, jdbc, tx);
     }
