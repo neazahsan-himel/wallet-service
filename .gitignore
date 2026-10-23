@@ -31,3 +31,8 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Markdown notes (kept local) ###
+*.md
+# README is a required deliverable of the brief, so it stays tracked
+!README.md
