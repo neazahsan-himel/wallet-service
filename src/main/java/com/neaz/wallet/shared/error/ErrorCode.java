@@ -6,7 +6,11 @@ package com.neaz.wallet.shared.error;
  */
 public enum ErrorCode {
 
-    INVALID_AMOUNT(400);
+    INVALID_AMOUNT(400),
+    VALIDATION_FAILED(400),
+    MALFORMED_REQUEST(400),
+    WALLET_NOT_FOUND(404),
+    INTERNAL_ERROR(500);
 
     private final int httpStatus;
 
