@@ -8,6 +8,12 @@ spring:
     password: wallet
   flyway:
     enabled: true
+  jackson:
+    # Amounts are whole dinars. Without these, 100.5 would be truncated to 100 and "100" coerced to 100.
+    deserialization:
+      accept-float-as-int: false
+    mapper:
+      allow-coercion-of-scalars: false
 
 server:
   port: 8088
