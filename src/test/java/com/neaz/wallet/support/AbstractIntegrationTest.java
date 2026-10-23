@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.client.RestTestClient;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -23,11 +24,13 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  * <p>Every test starts from empty tables (system accounts kept) and ends by checking the ledger invariants,
  * so no test can leave the books unbalanced without failing.
  *
- * <p>Scheduled jobs are switched off; tests that need the outbox publisher call it directly.
+ * <p>Scheduled jobs are switched off; tests that need the outbox publisher or the bill payment reconciler call them
+ * directly. The biller is the deterministic {@link FakeBiller}, reset before each test.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = "wallet.scheduling.enabled=false")
 @AutoConfigureRestTestClient
+@Import(FakeBillerConfig.class)
 public abstract class AbstractIntegrationTest {
 
     @ServiceConnection
@@ -52,13 +55,19 @@ public abstract class AbstractIntegrationTest {
     @Autowired
     protected LedgerService ledgerService;
 
+    @Autowired
+    protected FakeBiller biller;
+
     protected TestDataFactory data;
 
     @BeforeEach
     void cleanDatabase() {
         // TRUNCATE is not a row-level UPDATE/DELETE, so the append-only triggers do not block it.
         // In production the application role would not be granted TRUNCATE (see DECISIONS D8).
-        jdbc.sql("TRUNCATE ledger_lines, journal_entries, idempotency_keys, transfers, outbox_events").update();
+        jdbc.sql("""
+                TRUNCATE ledger_lines, journal_entries, idempotency_keys, transfers, outbox_events, bill_payments
+                """).update();
+        biller.reset();
         jdbc.sql("DELETE FROM accounts WHERE type = 'CUSTOMER'").update();
         data = new TestDataFactory(accountService, ledgerService, jdbc, tx);
     }

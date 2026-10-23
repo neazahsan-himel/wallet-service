@@ -27,3 +27,9 @@ wallet:
     batch-size: 100
     # Must comfortably exceed the time to send one batch, or a slow batch is re-leased and sent twice.
     lease: PT30S
+  billpayment:
+    # How long one owner (the live request, or a reconciler) has a payment to itself. The biller HTTP timeout must be
+    # well below this, or a slow pay() could still land after the reconciler has read NOT_PAID and refunded.
+    lease: PT30S
+    # When the biller's answer is unknown, ask again after this long.
+    recheck-interval: PT1M

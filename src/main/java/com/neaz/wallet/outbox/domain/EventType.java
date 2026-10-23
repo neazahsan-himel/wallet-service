@@ -2,5 +2,7 @@ package com.neaz.wallet.outbox.domain;
 
 /** Kind of event in the outbox. Values match {@code outbox_events_type_chk}. */
 public enum EventType {
-    TRANSFER_COMPLETED
+    TRANSFER_COMPLETED,
+    BILL_PAYMENT_SUCCEEDED,
+    BILL_PAYMENT_FAILED
 }

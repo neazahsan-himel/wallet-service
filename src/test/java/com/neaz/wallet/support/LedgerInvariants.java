@@ -1,5 +1,6 @@
 package com.neaz.wallet.support;
 
+import com.neaz.wallet.account.domain.SystemAccounts;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import java.util.UUID;
@@ -36,5 +37,16 @@ public final class LedgerInvariants {
                         """)
                 .query(UUID.class).list();
         assertThat(driftedWallets).as("wallets whose balance differs from the sum of their lines").isEmpty();
+
+        // Hold and row insert commit together, as do settle/refund and the status change, so money parked in
+        // clearing is always exactly the money of the payments still waiting for the biller's answer.
+        long inClearing = jdbc.sql("SELECT COALESCE(SUM(amount), 0) FROM ledger_lines WHERE account_id = :id")
+                .param("id", SystemAccounts.BILLER_CLEARING)
+                .query(Long.class).single();
+        long openPayments = jdbc.sql("""
+                        SELECT COALESCE(SUM(amount), 0) FROM bill_payments WHERE status IN ('PENDING', 'UNKNOWN')
+                        """)
+                .query(Long.class).single();
+        assertThat(inClearing).as("biller clearing balance vs open bill payments").isEqualTo(openPayments);
     }
 }
