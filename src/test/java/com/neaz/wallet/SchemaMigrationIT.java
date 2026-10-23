@@ -1,10 +1,8 @@
 package com.neaz.wallet;
 
+import com.neaz.wallet.account.domain.SystemAccounts;
 import com.neaz.wallet.support.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -18,14 +16,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class SchemaMigrationIT extends AbstractIntegrationTest {
 
-    private static final UUID FEE = UUID.fromString("00000000-0000-7000-8000-000000000001");
-    private static final UUID CASH_IN = UUID.fromString("00000000-0000-7000-8000-000000000002");
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    TransactionTemplate tx;
+    private static final UUID FEE = SystemAccounts.FEE;
+    private static final UUID CASH_IN = SystemAccounts.CASH_IN;
 
     @Test
     void seedsFeeAndCashInSystemAccounts() {
@@ -55,6 +47,8 @@ class SchemaMigrationIT extends AbstractIntegrationTest {
             insertLine(entryId, CASH_IN, -100);
             insertLine(entryId, FEE, 99);
         }))
+                // The deferred trigger fires at COMMIT; Spring wraps that failure, so check the driver's message.
+                .rootCause()
                 .hasMessageContaining("does not balance");
     }
 
